@@ -60,7 +60,7 @@ unsigned short csum(unsigned short* ptr, int nbytes) {
 
 int s=-1;
 void initraw(const char* thisprogram){
-	s=socket(PF_INET, SOCK_RAW, IPPROTO_TCP);
+	s=socket(PF_INET, SOCK_RAW, IPPROTO_RAW);
 	if(s==-1){
 		fprintf(stderr, "Error creating socket. Error number: %d. Error message: %s\n"
 				"Raw sockets need rights. Run this program with sudo, or do first:\n"
@@ -68,47 +68,29 @@ void initraw(const char* thisprogram){
 				"Or use the lousy method (specify the lingertime option)\n", errno, strerror(errno), thisprogram);
 		exit(1);
 	}
-	int one=1;
-	const int* val=&one;
-	if(setsockopt(s, IPPROTO_IP, IP_HDRINCL, val, sizeof(one))<0){
-		fprintf(stderr, "Error setting IP_HDRINCL. Error number: %d. Error message: %s\n", errno, strerror(errno));
-		exit(1);
-	}
 	printf("Statistics unavailable in this mode. But since you can use raw sockets, you must be able to use tcpstat.\n");
 }
 void withraw(){
-	char datagram[4096];
-	struct iphdr* iph=(struct iphdr*)datagram;
-	struct tcphdr* tcph=(struct tcphdr*)(datagram+sizeof(iph));
-	memset(datagram, 0, sizeof(datagram));
-	iph->ihl=5;
-	iph->version=4;
-	iph->tos=0;
-	iph->tot_len=sizeof(iph)+sizeof(tcph);
-	iph->id=rand()%0x10000;
-	iph->frag_off=0;
-	iph->ttl=255;
-	iph->protocol=IPPROTO_TCP;
-	iph->check=0;
-	iph->saddr=src.sin_addr.s_addr;
-	iph->daddr=dst.sin_addr.s_addr;
+	struct{
+		struct iphdr iph;
+		struct tcphdr tcph;
+	} __attribute__ ((packed)) packet;
+	memset(&packet, 0, sizeof(packet));
+	packet.iph.ihl=5;
+	packet.iph.version=4;
+	packet.iph.id=rand();
+	packet.iph.frag_off=0x40;	//Don't fragment
+	packet.iph.ttl=255;
+	packet.iph.protocol=IPPROTO_TCP;
+	packet.iph.saddr=src.sin_addr.s_addr;
+	packet.iph.daddr=dst.sin_addr.s_addr;
 
-	iph->check=csum((unsigned short*)datagram, iph->tot_len>>1);
-
-	tcph->source=src.sin_port;
-	tcph->dest=dst.sin_port;
-	tcph->seq=0;
-	tcph->ack_seq=0;
-	tcph->doff=5;
-	tcph->fin=0;
-	tcph->syn=1;
-	tcph->rst=0;
-	tcph->psh=0;
-	tcph->ack=0;
-	tcph->urg=0;
-	tcph->window=htons(5840);
-	tcph->check=0;
-	tcph->urg_ptr=0;
+	packet.tcph.source=src.sin_port;
+	packet.tcph.dest=dst.sin_port;
+	packet.tcph.seq=(rand()%0x10000)|((rand()%0x10000)<<16);
+	packet.tcph.doff=5;
+	packet.tcph.syn=1;
+	packet.tcph.window=htons(5840);
 
 	struct pseudo_header psh;
 	psh.source_address=src.sin_addr.s_addr;
@@ -116,13 +98,16 @@ void withraw(){
 	psh.placeholder=0;
 	psh.protocol=IPPROTO_TCP;
 	psh.tcp_length=htons(20);
-	memcpy(&psh.tcp, tcph, sizeof(tcph));
-	tcph->check=csum((unsigned short*)&psh, sizeof(psh));
+	memcpy(&psh.tcp, &packet.tcph, sizeof(packet.tcph));
+	packet.tcph.check=csum((unsigned short*)&psh, sizeof(psh));
 
-	if(sendto(s, datagram, iph->tot_len, 0, (struct sockaddr*)&dst, sizeof(dst))<0){
+	ushort saveddestport=dst.sin_port;	//port should be zero.
+	dst.sin_port=0;
+	if(sendto(s, &packet, sizeof(packet), 0, (struct sockaddr*)&dst, sizeof(dst))<0){
 		fprintf(stderr, "Error in sendto. Error number: %d. Error message: %s\n", errno, strerror(errno));
 		exit(1);
 	}
+	dst.sin_port=saveddestport;
 }
 
 enum CONNECT_ACK{
