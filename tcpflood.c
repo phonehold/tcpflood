@@ -79,7 +79,7 @@ void withraw(){
 	packet.iph.ihl=5;
 	packet.iph.version=4;
 	packet.iph.id=rand();
-	packet.iph.frag_off=0x40;	//Don't fragment
+	packet.iph.frag_off=htons(0x4000);	//Don't fragment
 	packet.iph.ttl=255;
 	packet.iph.protocol=IPPROTO_TCP;
 	packet.iph.saddr=src.sin_addr.s_addr;
@@ -90,7 +90,7 @@ void withraw(){
 	packet.tcph.seq=(rand()%0x10000)|((rand()%0x10000)<<16);
 	packet.tcph.doff=5;
 	packet.tcph.syn=1;
-	packet.tcph.window=htons(5840);
+	packet.tcph.window=0xFFFF;
 
 	struct pseudo_header psh;
 	psh.source_address=src.sin_addr.s_addr;
